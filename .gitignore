@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# Cache
+cache/
+tmp/
+
+# Models
+*.pth
+*.pkl
+
+# Env
+.env
+venv/
