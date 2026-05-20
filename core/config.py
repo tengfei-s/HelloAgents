@@ -22,7 +22,7 @@ class Config(BaseModel):
             debug=os.getenv("DEBUG", "false").lower() == "true",
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             temperature=float(os.getenv("TEMPERATURE", "0.7")),
-            max_tokens=int(os.getenv("MAX_TOKENS")) if os.getenv("MAX_TOKENS") else None,
+            max_tokens=int(os.getenv("MAX_TOKENS", "1000")),
         )
 
     def to_dict(self) -> Dict[str, Any]:

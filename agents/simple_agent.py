@@ -7,12 +7,11 @@ from core.agent import Agent
 from core.llm import HelloAgentsLLM
 from core.config import Config
 from core.message import Message
-from tools.search_tool import search
-from tools.tool_executor import ToolExecutor
+from tools.registry import ToolRegistry
 
 
 class SimpleAgent(Agent):
-    """简单的对话Agent，支持可选的工具调用"""
+    """简单的对话Agent,支持可选的工具调用"""
 
     def __init__(
             self,
@@ -38,6 +37,86 @@ class SimpleAgent(Agent):
         self.tool_registry = tool_registry
         self.enable_tool_calling = enable_tool_calling and tool_registry is not None
 
+    def run(self, input_text: str, max_tool_iterations: int = 3, **kwargs) -> str:
+        """
+        运行SimpleAgent,支持可选的工具调用
+
+        Args:
+            input_text: 用户输入
+            max_tool_iterations: 最大工具调用迭代次数（仅在启用工具时有效）
+            **kwargs: 其他参数
+
+        Returns:
+            Agent响应
+        """
+        # 构建消息列表
+        messages = []
+
+        # 添加系统消息（可能包含工具信息）
+        enhanced_system_prompt = self._get_enhanced_system_prompt()
+        messages.append({"role": "system", "content": enhanced_system_prompt})
+
+        # 添加历史消息
+        for msg in self._history:
+            messages.append({"role": msg.role, "content": msg.content})
+
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": input_text})
+
+        # 如果没有启用工具调用，使用原有逻辑
+        if not self.enable_tool_calling:
+            response = self.llm.invoke(messages, **kwargs)
+            self.add_message(Message(input_text, "user"))
+            self.add_message(Message(response, "assistant"))
+            return response
+
+        # 迭代处理，支持多轮工具调用
+        current_iteration = 0
+        final_response = ""
+
+        while current_iteration < max_tool_iterations:
+            # 调用LLM
+            response = self.llm.invoke(messages, **kwargs)
+
+            # 检查是否有工具调用
+            tool_calls = self._parse_tool_calls(response)
+
+            if tool_calls:
+                # 执行所有工具调用并收集结果
+                tool_results = []
+                clean_response = response
+
+                # 构建包含工具结果的消息
+                messages.append({"role": "assistant", "content": clean_response})
+
+                for call in tool_calls:
+                    result = self._execute_tool_call(call['tool_name'], call['parameters'])
+                    tool_results.append(result)
+                    # 从响应中移除工具调用标记
+                    clean_response = clean_response.replace(call['original'], "")
+
+                # 添加工具结果
+                tool_results_text = "\n\n".join(tool_results)
+                messages.append(
+                    {"role": "user", "content": f"工具执行结果：\n{tool_results_text}\n\n请基于这些结果给出完整的回答。"})
+
+                current_iteration += 1
+                continue
+
+            # 没有工具调用，这是最终回答
+            final_response = response
+            break
+
+        # 如果超过最大迭代次数，获取最后一次回答
+        if current_iteration >= max_tool_iterations and not final_response:
+            final_response = self.llm.invoke(messages, **kwargs)
+
+        # 保存到历史记录
+        self.add_message(Message(input_text, "user"))
+        self.add_message(Message(final_response, "assistant"))
+
+        return final_response
+    
     def _get_enhanced_system_prompt(self) -> str:
         """构建增强的系统提示词，包含工具信息"""
         base_prompt = self.system_prompt or "你是一个有用的AI助手。"
@@ -243,86 +322,6 @@ class SimpleAgent(Agent):
         else:
             return {'input': parameters}
 
-    def run(self, input_text: str, max_tool_iterations: int = 3, **kwargs) -> str:
-        """
-        运行SimpleAgent，支持可选的工具调用
-
-        Args:
-            input_text: 用户输入
-            max_tool_iterations: 最大工具调用迭代次数（仅在启用工具时有效）
-            **kwargs: 其他参数
-
-        Returns:
-            Agent响应
-        """
-        # 构建消息列表
-        messages = []
-
-        # 添加系统消息（可能包含工具信息）
-        enhanced_system_prompt = self._get_enhanced_system_prompt()
-        messages.append({"role": "system", "content": enhanced_system_prompt})
-
-        # 添加历史消息
-        for msg in self._history:
-            messages.append({"role": msg.role, "content": msg.content})
-
-        # 添加当前用户消息
-        messages.append({"role": "user", "content": input_text})
-
-        # 如果没有启用工具调用，使用原有逻辑
-        if not self.enable_tool_calling:
-            response = self.llm.invoke(messages, **kwargs)
-            self.add_message(Message(input_text, "user"))
-            self.add_message(Message(response, "assistant"))
-            return response
-
-        # 迭代处理，支持多轮工具调用
-        current_iteration = 0
-        final_response = ""
-
-        while current_iteration < max_tool_iterations:
-            # 调用LLM
-            response = self.llm.invoke(messages, **kwargs)
-
-            # 检查是否有工具调用
-            tool_calls = self._parse_tool_calls(response)
-
-            if tool_calls:
-                # 执行所有工具调用并收集结果
-                tool_results = []
-                clean_response = response
-
-                # 构建包含工具结果的消息
-                messages.append({"role": "assistant", "content": clean_response})
-
-                for call in tool_calls:
-                    result = self._execute_tool_call(call['tool_name'], call['parameters'])
-                    tool_results.append(result)
-                    # 从响应中移除工具调用标记
-                    clean_response = clean_response.replace(call['original'], "")
-
-                # 添加工具结果
-                tool_results_text = "\n\n".join(tool_results)
-                messages.append(
-                    {"role": "user", "content": f"工具执行结果：\n{tool_results_text}\n\n请基于这些结果给出完整的回答。"})
-
-                current_iteration += 1
-                continue
-
-            # 没有工具调用，这是最终回答
-            final_response = response
-            break
-
-        # 如果超过最大迭代次数，获取最后一次回答
-        if current_iteration >= max_tool_iterations and not final_response:
-            final_response = self.llm.invoke(messages, **kwargs)
-
-        # 保存到历史记录
-        self.add_message(Message(input_text, "user"))
-        self.add_message(Message(final_response, "assistant"))
-
-        return final_response
-
     def add_tool(self, tool, auto_expand: bool = True) -> None:
         """
         添加工具到Agent（便利方法）
@@ -334,7 +333,6 @@ class SimpleAgent(Agent):
         如果工具是可展开的（expandable=True），会自动展开为多个独立工具
         """
         if not self.tool_registry:
-            from ..tools.registry import ToolRegistry
             self.tool_registry = ToolRegistry()
             self.enable_tool_calling = True
 

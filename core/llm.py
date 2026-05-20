@@ -32,7 +32,7 @@ class HelloAgentsLLM:
             max_tokens: Optional[int] = None,
             timeout: Optional[int] = None,
     ):
-        self.model = model or os.getenv("LLM_MODEL_ID")
+        self.model = model or os.getenv("DASHSCOPE_MODEL_ID")
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout or int(os.getenv("LLM_TIMEOUT", "60"))
@@ -51,7 +51,7 @@ class HelloAgentsLLM:
         if not self.model:
             self.model = self._get_default_model()
         if not all([self.api_key, self.base_url]):
-            raise "API密钥和服务地址必须被提供或在.env文件中定义。"
+            raise ValueError("API密钥和服务地址必须被提供或在.env文件中定义。")
 
         # 创建OpenAI客户端
         self._client = self._create_client()
